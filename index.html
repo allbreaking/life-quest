@@ -49,10 +49,16 @@ window.addEventListener('load', function() {
         return {...S, taskDone:[...S.taskDone], subDone:[...(S.subDone||new Set())], unlocked:[...S.unlocked]};
       }
       function deserialize(data) {
-        data.taskDone = new Set(Array.isArray(data.taskDone) ? data.taskDone : []);
-        data.subDone  = new Set(Array.isArray(data.subDone)  ? data.subDone  : Object.keys(data.subDone||{}).map(Number).filter(Boolean));
-        data.unlocked = new Set(Array.isArray(data.unlocked) ? data.unlocked : []);
+        // Firebase stores empty arrays as null — restore all array fields
+        data.taskDone    = new Set(Array.isArray(data.taskDone) ? data.taskDone : []);
+        data.subDone     = new Set(Array.isArray(data.subDone)  ? data.subDone  : Object.keys(data.subDone||{}).map(Number).filter(Boolean));
+        data.unlocked    = new Set(Array.isArray(data.unlocked) ? data.unlocked : []);
+        data.customLocs  = Array.isArray(data.customLocs)  ? data.customLocs  : [];
+        data.userTasks   = Array.isArray(data.userTasks)   ? data.userTasks   : [];
+        data.weekDone    = Array.isArray(data.weekDone)    ? data.weekDone    : [false,false,false,false,false,false,false];
+        data.customRooms = data.customRooms && typeof data.customRooms==='object' ? data.customRooms : {};
         if(!data.svBase) data.svBase={str:60,exe:50,foc:55,moo:65};
+        if(!data.sv) data.sv={str:60,exe:50,foc:55,hlt:50,moo:65,int:40};
         return data;
       }
 
@@ -717,11 +723,15 @@ function loadState() {
     const raw = localStorage.getItem('lq_state_v2');
     if (raw) {
       S = JSON.parse(raw);
-      S.taskDone = new Set(Array.isArray(S.taskDone) ? S.taskDone : []);
-      // subDone can be array, object {}, or missing — always convert to Set
-      S.subDone = new Set(Array.isArray(S.subDone) ? S.subDone : Object.keys(S.subDone||{}).map(Number).filter(Boolean));
-      S.unlocked = new Set(Array.isArray(S.unlocked) ? S.unlocked : []);
+      S.taskDone    = new Set(Array.isArray(S.taskDone) ? S.taskDone : []);
+      S.subDone     = new Set(Array.isArray(S.subDone)  ? S.subDone  : Object.keys(S.subDone||{}).map(Number).filter(Boolean));
+      S.unlocked    = new Set(Array.isArray(S.unlocked) ? S.unlocked : []);
+      S.customLocs  = Array.isArray(S.customLocs)  ? S.customLocs  : [];
+      S.userTasks   = Array.isArray(S.userTasks)   ? S.userTasks   : [];
+      S.weekDone    = Array.isArray(S.weekDone)    ? S.weekDone    : [false,false,false,false,false,false,false];
+      S.customRooms = S.customRooms && typeof S.customRooms==='object' ? S.customRooms : {};
       if(!S.svBase) S.svBase={str:60,exe:50,foc:55,moo:65};
+      if(!S.sv) S.sv={str:60,exe:50,foc:55,hlt:50,moo:65,int:40};
       return;
     }
   } catch(e) {}
@@ -1027,11 +1037,28 @@ function taskItemExpandable(t, bonus) {
   const done = S.taskDone.has(t.id);
   const cfg = TYPES[t.type] || TYPES.daily;
   const subsTotal = t.subs ? t.subs.length : 0;
-  const subsDone = t.subs ? t.subs.filter(s => S.subDone && S.subDone.has(s.id)).length : 0;
   const isExpanded = _taskExpandId === t.id;
-  const pct = subsTotal ? Math.round(subsDone / subsTotal * 100) : (done ? 100 : 0);
+
+  // lightweight collapsed view for done tasks (no sub-rendering needed)
+  if (done && !isExpanded) {
+    return `<div class="t-card done-card" onclick="toggleTaskExpand(${t.id})" style="cursor:pointer">
+      <div style="display:flex;align-items:center;gap:8px;padding:7px 10px">
+        <div class="t-type-dot" style="background:${cfg.col}"></div>
+        <div style="font-size:15px;width:20px;text-align:center;flex-shrink:0">${t.ico||'📌'}</div>
+        <div style="flex:1;font-size:12px;font-weight:700;text-decoration:line-through;color:var(--txt3)">${t.nm}</div>
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0" onclick="event.stopPropagation()">
+          <button onclick="editTask(${t.id})" style="border:none;background:#f0ede8;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center">✏️</button>
+          <button onclick="deleteUserTask(${t.id})" style="border:none;background:#fce8e8;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:10px;display:flex;align-items:center;justify-content:center">🗑</button>
+          <div class="chk ck" onclick="toggleTask(${t.id},${t.xp})" style="width:22px;height:22px;font-size:10px">✓</div>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  const subsDone = subsTotal ? t.subs.filter(s => S.subDone && S.subDone.has(s.id)).length : 0;
+  const pct = subsTotal ? Math.round(subsDone / subsTotal * 100) : 0;
   const locLabel = TASK_LOCS.find(l => l.id === t.loc);
-  const pills = (t.attrs||[]).map(k=>{const s=sd(k);return s?`<span class="t-attr" style="color:${s.tc};border-color:${s.col}60;background:${s.bc}">${s.nm}</span>`:''}).join('');
+  const rl = repeatLabel(t);
 
   const subList = subsTotal > 0 && isExpanded ? `
     <div style="padding:6px 12px 10px;border-top:1px solid #f0e8dc;display:flex;flex-direction:column;gap:5px">
@@ -1039,26 +1066,26 @@ function taskItemExpandable(t, bonus) {
         const sd2 = S.subDone && S.subDone.has(s.id);
         return `<div style="display:flex;align-items:center;gap:8px">
           <div onclick="event.stopPropagation();toggleSubTask(${s.id},${t.id},${t.xp})"
-            style="width:18px;height:18px;border-radius:4px;border:2px solid ${sd2?cfg.col:'var(--bd)'};background:${sd2?cfg.col:'var(--bg)'};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0;transition:all 0.12s">${sd2?'✓':''}</div>
+            style="width:18px;height:18px;border-radius:4px;border:2px solid ${sd2?cfg.col:'var(--bd)'};background:${sd2?cfg.col:'var(--bg)'};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0">${sd2?'✓':''}</div>
           <span style="font-size:11px;color:${sd2?'var(--txt3)':'var(--txt)'};${sd2?'text-decoration:line-through':''};flex:1">${s.nm}</span>
         </div>`;
       }).join('')}
     </div>` : '';
 
-  return `<div class="t-card ${done?'done-card':''}" onclick="toggleTaskExpand(${t.id})" style="cursor:pointer">
+  return `<div class="t-card" onclick="toggleTaskExpand(${t.id})" style="cursor:pointer">
     <div style="display:flex;align-items:center;gap:8px;padding:8px 10px">
       <div class="t-type-dot" style="background:${cfg.col}"></div>
       <div style="font-size:16px;width:20px;text-align:center;flex-shrink:0">${t.ico||'📌'}</div>
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:700;color:var(--txt);${done?'text-decoration:line-through;color:var(--txt3)':''}">${t.nm}</div>
+        <div style="font-size:12px;font-weight:700;color:var(--txt)">${t.nm}</div>
         <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap;margin-top:2px">
           ${t.time?`<span style="font-size:9px;background:#f0f8ec;color:#4a8a50;border:1px solid #b0dca8;border-radius:5px;padding:0 4px;font-weight:700">🕐${t.time}</span>`:''}
           ${locLabel&&locLabel.id!=='any'?`<span style="font-size:9px;color:var(--txt3);font-weight:600">📍${locLabel.nm}</span>`:''}
-          ${pills}
+          ${rl?`<span style="font-size:9px;background:#f0ecfc;color:#7848b8;border:1px solid #c8a8f0;border-radius:5px;padding:0 4px;font-weight:700">🔁${rl}</span>`:''}
         </div>
         ${subsTotal>0?`<div style="display:flex;align-items:center;gap:5px;margin-top:4px">
           <div style="flex:1;height:3px;background:#e8ddd0;border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:${cfg.col};border-radius:2px;transition:width 0.4s"></div>
+            <div style="height:100%;width:${pct}%;background:${cfg.col};border-radius:2px"></div>
           </div>
           <span style="font-size:9px;color:var(--txt2);font-weight:700;white-space:nowrap">${subsDone}/${subsTotal}</span>
         </div>`:''}
@@ -1729,10 +1756,15 @@ function doImport() {
   if(!raw) return;
   try {
     const parsed = JSON.parse(raw);
-    parsed.taskDone = new Set(Array.isArray(parsed.taskDone) ? parsed.taskDone : []);
-    parsed.subDone  = new Set(Array.isArray(parsed.subDone)  ? parsed.subDone  : Object.keys(parsed.subDone||{}).map(Number).filter(Boolean));
-    parsed.unlocked = new Set(Array.isArray(parsed.unlocked) ? parsed.unlocked : []);
+    parsed.taskDone    = new Set(Array.isArray(parsed.taskDone) ? parsed.taskDone : []);
+    parsed.subDone     = new Set(Array.isArray(parsed.subDone)  ? parsed.subDone  : Object.keys(parsed.subDone||{}).map(Number).filter(Boolean));
+    parsed.unlocked    = new Set(Array.isArray(parsed.unlocked) ? parsed.unlocked : []);
+    parsed.customLocs  = Array.isArray(parsed.customLocs)  ? parsed.customLocs  : [];
+    parsed.userTasks   = Array.isArray(parsed.userTasks)   ? parsed.userTasks   : [];
+    parsed.weekDone    = Array.isArray(parsed.weekDone)    ? parsed.weekDone    : [false,false,false,false,false,false,false];
+    parsed.customRooms = parsed.customRooms && typeof parsed.customRooms==='object' ? parsed.customRooms : {};
     if(!parsed.svBase) parsed.svBase={str:60,exe:50,foc:55,moo:65};
+    if(!parsed.sv) parsed.sv={str:60,exe:50,foc:55,hlt:50,moo:65,int:40};
     S = parsed;
     if(el) el.style.display='none';
     saveState(); render(); updateXPBar();
@@ -1769,15 +1801,33 @@ function nav(t) {
   render();
 }
 
+let _renderPending = false;
 function render() {
+  if (_renderPending) return;
+  _renderPending = true;
+  requestAnimationFrame(() => {
+    _renderPending = false;
+    _doRender();
+  });
+}
+function _doRender() {
   const p=document.getElementById('panel'); if(!p)return;
   let html='';
-  if(_curTab==='world')  html=renderWorld();
-  else if(_curTab==='tasks')  html=renderTasks();
-  else if(_curTab==='stats')  html=renderStats();
-  else if(_curTab==='streak') html=renderStreak();
-  else if(_curTab==='ach')    html=renderAch();
-  else if(_curTab==='map')    html=renderMap();
+  try {
+    if(_curTab==='world')  html=renderWorld();
+    else if(_curTab==='tasks')  html=renderTasks();
+    else if(_curTab==='stats')  html=renderStats();
+    else if(_curTab==='streak') html=renderStreak();
+    else if(_curTab==='ach')    html=renderAch();
+    else if(_curTab==='map')    html=renderMap();
+  } catch(e) {
+    p.innerHTML=`<div style="padding:20px;color:#c84040;font-size:12px;line-height:1.8">
+      <b>渲染出错（${_curTab}）：</b><br>${e.message}<br><br>
+      <pre style="font-size:10px;overflow:auto;max-height:200px">${e.stack||''}</pre>
+    </div>`;
+    updateXPBar();
+    return;
+  }
   p.innerHTML=html;
   updateXPBar();
 
