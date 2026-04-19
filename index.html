@@ -6,30 +6,17 @@
 <title>Life Quest ✨</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+<script>
+// Firebase loads asynchronously after page is ready — never blocks rendering
+window.fbSave = function() {}; // stub until Firebase loads
+window.fbLoad = function() {};
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDg_0vMzFxSAR7GQm2C24bFJfKMCIv6sl0",
-  authDomain: "life-quest-a27fd.firebaseapp.com",
-  databaseURL: "https://life-quest-a27fd-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "life-quest-a27fd",
-  storageBucket: "life-quest-a27fd.firebasestorage.app",
-  messagingSenderId: "777139175049",
-  appId: "1:777139175049:web:7b52a33410a1e5bdfcd058"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-const SAVE_KEY = 'lifequest/save';
-let _fbSaveTimer = null;
-
-function serializeState() {
-  return {...S, taskDone:[...S.taskDone], subDone:[...(S.subDone||new Set())], unlocked:[...S.unlocked]};
+function showSyncStatus(msg) {
+  const el = document.getElementById('sync-status');
+  if(el) { el.textContent = msg; el.style.opacity='1'; clearTimeout(el._t); el._t=setTimeout(()=>el.style.opacity='0',3000); }
 }
 
-function deserializeState(data) {
+function deserializeForImport(data) {
   data.taskDone = new Set(Array.isArray(data.taskDone) ? data.taskDone : []);
   data.subDone  = new Set(Array.isArray(data.subDone)  ? data.subDone  : Object.keys(data.subDone||{}).map(Number).filter(Boolean));
   data.unlocked = new Set(Array.isArray(data.unlocked) ? data.unlocked : []);
@@ -37,59 +24,77 @@ function deserializeState(data) {
   return data;
 }
 
-function showSyncStatus(msg) {
-  const el = document.getElementById('sync-status');
-  if(el) { el.textContent = msg; el.style.opacity='1'; clearTimeout(el._t); el._t=setTimeout(()=>el.style.opacity='0',3000); }
-}
+// Load Firebase SDK dynamically after page renders
+window.addEventListener('load', function() {
+  setTimeout(function() {
+    const s1 = document.createElement('script');
+    s1.type = 'module';
+    s1.textContent = `
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+      import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+      const app = initializeApp({
+        apiKey: "AIzaSyDg_0vMzFxSAR7GQm2C24bFJfKMCIv6sl0",
+        authDomain: "life-quest-a27fd.firebaseapp.com",
+        databaseURL: "https://life-quest-a27fd-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "life-quest-a27fd",
+        storageBucket: "life-quest-a27fd.firebasestorage.app",
+        messagingSenderId: "777139175049",
+        appId: "1:777139175049:web:7b52a33410a1e5bdfcd058"
+      });
+      const db = getDatabase(app);
+      const SAVE_KEY = 'lifequest/save';
+      let _timer = null;
 
-// debounced push — never blocks UI
-window.fbSave = function() {
-  clearTimeout(_fbSaveTimer);
-  _fbSaveTimer = setTimeout(async () => {
-    try {
-      await set(ref(db, SAVE_KEY), serializeState());
-      showSyncStatus('✅ 已同步');
-    } catch(e) {
-      showSyncStatus('⚠️ 同步失败');
-    }
-  }, 2000);
-};
+      function serialize() {
+        return {...S, taskDone:[...S.taskDone], subDone:[...(S.subDone||new Set())], unlocked:[...S.unlocked]};
+      }
+      function deserialize(data) {
+        data.taskDone = new Set(Array.isArray(data.taskDone) ? data.taskDone : []);
+        data.subDone  = new Set(Array.isArray(data.subDone)  ? data.subDone  : Object.keys(data.subDone||{}).map(Number).filter(Boolean));
+        data.unlocked = new Set(Array.isArray(data.unlocked) ? data.unlocked : []);
+        if(!data.svBase) data.svBase={str:60,exe:50,foc:55,moo:65};
+        return data;
+      }
 
-// background pull — page is already rendered with local data, this just refreshes if cloud is newer
-window.fbLoad = function() {
-  // set a 5s timeout — if Firebase takes longer, silently give up
-  const timeout = setTimeout(() => showSyncStatus('⚠️ 网络慢，使用本地存档'), 5000);
-  get(ref(db, SAVE_KEY)).then(snap => {
-    clearTimeout(timeout);
-    if (!snap.exists()) { window.fbSave(); showSyncStatus('✅ 已上传本地存档'); return; }
-    const data = deserializeState(snap.val());
-    const localRaw = localStorage.getItem('lq_state_v2');
-    let useCloud = true;
-    if (localRaw) {
-      try {
-        const local = JSON.parse(localRaw);
-        useCloud = (data.xp + (data.lv-1)*100) >= (local.xp + (local.lv-1)*100);
-      } catch(e) {}
-    }
-    if (useCloud) {
-      S = data;
-      localStorage.setItem('lq_state_v2', JSON.stringify(serializeState()));
-      render(); updateXPBar();
-      showSyncStatus('✅ 云端存档已加载');
-    } else {
-      window.fbSave();
-      showSyncStatus('✅ 本地存档较新');
-    }
-  }).catch(() => {
-    clearTimeout(timeout);
-    showSyncStatus('⚠️ 网络不可用，使用本地存档');
-  });
-};
+      window.fbSave = function() {
+        clearTimeout(_timer);
+        _timer = setTimeout(() => {
+          set(ref(db, SAVE_KEY), serialize())
+            .then(() => showSyncStatus('✅ 已同步'))
+            .catch(() => showSyncStatus('⚠️ 同步失败'));
+        }, 2000);
+      };
 
-// fire after page is already painted — never delays first render
-window.addEventListener('load', () => {
-  // small delay so the page fully initialises first
-  setTimeout(() => window.fbLoad(), 300);
+      // pull from cloud, compare with local, use newer
+      const to = setTimeout(() => showSyncStatus('⚠️ 网络慢，使用本地存档'), 8000);
+      get(ref(db, SAVE_KEY)).then(snap => {
+        clearTimeout(to);
+        if (!snap.exists()) { window.fbSave(); showSyncStatus('✅ 已上传本地存档'); return; }
+        const cloud = deserialize(snap.val());
+        const localRaw = localStorage.getItem('lq_state_v2');
+        let useCloud = true;
+        if (localRaw) {
+          try {
+            const local = JSON.parse(localRaw);
+            useCloud = (cloud.xp + (cloud.lv-1)*100) >= (local.xp + (local.lv-1)*100);
+          } catch(e) {}
+        }
+        if (useCloud) {
+          S = cloud;
+          localStorage.setItem('lq_state_v2', JSON.stringify({...S, taskDone:[...S.taskDone], subDone:[...(S.subDone||new Set())], unlocked:[...S.unlocked]}));
+          render(); updateXPBar();
+          showSyncStatus('✅ 云端存档已加载');
+        } else {
+          window.fbSave();
+          showSyncStatus('✅ 本地存档较新');
+        }
+      }).catch(() => {
+        clearTimeout(to);
+        showSyncStatus('⚠️ 网络不可用，使用本地存档');
+      });
+    `;
+    document.head.appendChild(s1);
+  }, 500); // wait 500ms after load — page is fully rendered by then
 });
 </script>
 <style>
