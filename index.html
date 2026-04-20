@@ -51,7 +51,7 @@ window.addEventListener('load', function() {
       function deserialize(data) {
         // Firebase stores empty arrays as null — restore all array fields
         data.taskDone    = new Set(Array.isArray(data.taskDone) ? data.taskDone : []);
-        data.subDone     = new Set(Array.isArray(data.subDone)  ? data.subDone  : Object.keys(data.subDone||{}).map(Number).filter(Boolean));
+        data.subDone     = new Set(Array.isArray(data.subDone)  ? data.subDone.map(String)  : Object.keys(data.subDone||{}));
         data.unlocked    = new Set(Array.isArray(data.unlocked) ? data.unlocked : []);
         data.customLocs  = Array.isArray(data.customLocs)  ? data.customLocs  : [];
         data.userTasks   = Array.isArray(data.userTasks)   ? data.userTasks   : [];
@@ -78,21 +78,21 @@ window.addEventListener('load', function() {
         if (!snap.exists()) { window.fbSave(); showSyncStatus('✅ 已上传本地存档'); return; }
         const cloud = deserialize(snap.val());
         const localRaw = localStorage.getItem('lq_state_v2');
-        let useCloud = true;
+        const cloudTs = cloud.lastSaved || 0;
+        let localTs = 0;
         if (localRaw) {
-          try {
-            const local = JSON.parse(localRaw);
-            useCloud = (cloud.xp + (cloud.lv-1)*100) >= (local.xp + (local.lv-1)*100);
-          } catch(e) {}
+          try { localTs = JSON.parse(localRaw).lastSaved || 0; } catch(e) {}
         }
-        if (useCloud) {
+        if (cloudTs >= localTs) {
+          // cloud is newer or same — use cloud
           S = cloud;
           localStorage.setItem('lq_state_v2', JSON.stringify({...S, taskDone:[...S.taskDone], subDone:[...(S.subDone||new Set())], unlocked:[...S.unlocked]}));
           render(); updateXPBar();
           showSyncStatus('✅ 云端存档已加载');
         } else {
+          // local is newer — push local to cloud
           window.fbSave();
-          showSyncStatus('✅ 本地存档较新');
+          showSyncStatus('✅ 本地存档较新，已上传');
         }
       }).catch(() => {
         clearTimeout(to);
@@ -672,7 +672,12 @@ function checkNewDay() {
     else if (repeat === 'biweekly') shouldReset = dow === rdJS && weekNum % 2 === 0;
     else if (repeat === 'monthly') shouldReset = dom === (t.repeatDate || 1);
     // 'none' tasks never auto-reset
-    if (shouldReset) S.taskDone.delete(t.id);
+    if (shouldReset) {
+      S.taskDone.delete(t.id);
+      if(!S.subDone) S.subDone = new Set();
+      // clear with both number and string to handle any type mismatch
+      (t.subs||[]).forEach(s => { S.subDone.delete(s.id); S.subDone.delete(String(s.id)); S.subDone.delete(Number(s.id)); });
+    }
   });
 
   // stat reset: daily stats go back to base, long stats decay by 1
@@ -724,7 +729,7 @@ function loadState() {
     if (raw) {
       S = JSON.parse(raw);
       S.taskDone    = new Set(Array.isArray(S.taskDone) ? S.taskDone : []);
-      S.subDone     = new Set(Array.isArray(S.subDone)  ? S.subDone  : Object.keys(S.subDone||{}).map(Number).filter(Boolean));
+      S.subDone     = new Set(Array.isArray(S.subDone)  ? S.subDone.map(String)  : Object.keys(S.subDone||{}));
       S.unlocked    = new Set(Array.isArray(S.unlocked) ? S.unlocked : []);
       S.customLocs  = Array.isArray(S.customLocs)  ? S.customLocs  : [];
       S.userTasks   = Array.isArray(S.userTasks)   ? S.userTasks   : [];
@@ -744,6 +749,7 @@ function loadState() {
   S.taskDone.add(104); S.taskDone.add(106); S.taskDone.add(108);
 }
 function saveState() {
+  S.lastSaved = Date.now(); // timestamp every save
   try {
     const snap = {...S, taskDone: [...S.taskDone], subDone: [...(S.subDone||new Set())], unlocked: [...S.unlocked]};
     localStorage.setItem('lq_state_v2', JSON.stringify(snap));
@@ -1055,7 +1061,7 @@ function taskItemExpandable(t, bonus) {
     </div>`;
   }
 
-  const subsDone = subsTotal ? t.subs.filter(s => S.subDone && S.subDone.has(s.id)).length : 0;
+  const subsDone = subsTotal ? t.subs.filter(s => S.subDone && (S.subDone.has(s.id)||S.subDone.has(String(s.id)))).length : 0;
   const pct = subsTotal ? Math.round(subsDone / subsTotal * 100) : 0;
   const locLabel = TASK_LOCS.find(l => l.id === t.loc);
   const rl = repeatLabel(t);
@@ -1063,7 +1069,7 @@ function taskItemExpandable(t, bonus) {
   const subList = subsTotal > 0 && isExpanded ? `
     <div style="padding:6px 12px 10px;border-top:1px solid #f0e8dc;display:flex;flex-direction:column;gap:5px">
       ${t.subs.map(s => {
-        const sd2 = S.subDone && S.subDone.has(s.id);
+        const sd2 = S.subDone && (S.subDone.has(s.id)||S.subDone.has(String(s.id)));
         return `<div style="display:flex;align-items:center;gap:8px">
           <div onclick="event.stopPropagation();toggleSubTask(${s.id},${t.id},${t.xp})"
             style="width:18px;height:18px;border-radius:4px;border:2px solid ${sd2?cfg.col:'var(--bd)'};background:${sd2?cfg.col:'var(--bg)'};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;color:#fff;flex-shrink:0">${sd2?'✓':''}</div>
@@ -1536,7 +1542,7 @@ function toggleSubTask(sid, parentId, parentXp){
       });
     }
   } else {
-    S.subDone.add(sid);
+    S.subDone.add(String(sid));
     // check if all subs of parent are now done → auto-complete parent
     if(parentId!=null && !S.taskDone.has(parentId)){
       const parent=allTasks().find(t=>t.id===parentId);
@@ -1757,7 +1763,7 @@ function doImport() {
   try {
     const parsed = JSON.parse(raw);
     parsed.taskDone    = new Set(Array.isArray(parsed.taskDone) ? parsed.taskDone : []);
-    parsed.subDone     = new Set(Array.isArray(parsed.subDone)  ? parsed.subDone  : Object.keys(parsed.subDone||{}).map(Number).filter(Boolean));
+    parsed.subDone     = new Set(Array.isArray(parsed.subDone)  ? parsed.subDone.map(String)  : Object.keys(parsed.subDone||{}));
     parsed.unlocked    = new Set(Array.isArray(parsed.unlocked) ? parsed.unlocked : []);
     parsed.customLocs  = Array.isArray(parsed.customLocs)  ? parsed.customLocs  : [];
     parsed.userTasks   = Array.isArray(parsed.userTasks)   ? parsed.userTasks   : [];
