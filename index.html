@@ -1465,7 +1465,7 @@ let _taskExpandId = null;
 let _pendingDeleteId = null;
 
 function toggleGoals(){ _goalsOpen=!_goalsOpen; render(); }
-function setTaskType(t){ S.taskCurType=t; _taskAddOpen=false; saveState(); render(); }
+function setTaskType(t){ S.taskCurType=t; _taskAddOpen=false; saveState(); autoExpandFirst(); render(); }
 function openTaskAdd(type){ _taskAF={type:type||S.taskCurType||'daily',nm:'',ico:'⭐',xp:30,attrs:[],loc:'any',time:'',repeat:'daily',repeatDay:1,repeatDate:1,desc:'',subs:[],subInp:''}; _taskEditId=null; _taskAddOpen=true; render(); }
 function closeTaskAdd(){ _taskAddOpen=false; _taskEditId=null; render(); }
 function setTaskAFType(t){ _taskAF.type=t; render(); }
@@ -1664,10 +1664,10 @@ function selLoc(id) {
   S.selectedLoc=id;
   const loc=getLoc(id);
   if(loc?.rooms?.length) S.selectedRoom=loc.rooms[0].id;
-  saveState(); render();
+  saveState(); autoExpandFirst(); render();
 }
 function selLocAndNav(id) { selLoc(id); nav('world'); }
-function selRoom(id) { S.selectedRoom=id; saveState(); render(); }
+function selRoom(id) { S.selectedRoom=id; saveState(); autoExpandFirst(); render(); }
 function toggleDay(i) {
   S.weekDone[i]=!S.weekDone[i];
   let s=0; for(let j=6;j>=0;j--){if(S.weekDone[j])s++;else break;}
@@ -1709,7 +1709,7 @@ function toggleTask(id, xp) {
     }
     checkAchs();
   }
-  saveState(); updateXPBar(); render();
+  saveState(); updateXPBar(); autoExpandFirst(); render();
 }
 function qAdd() {
   const inp=document.getElementById('wi'); if(!inp)return;
@@ -1814,10 +1814,16 @@ function autoExpandFirst() {
   if (_curTab === 'world') {
     tasks = getWorldTasks();
   } else if (_curTab === 'tasks') {
-    tasks = allTasks().filter(t => t.type === (S.taskCurType||'daily'));
+    const sorted = allTasks().filter(t => t.type === (S.taskCurType||'daily'));
+    tasks = [...sorted].sort((a,b) => {
+      const at=a.time||'', bt=b.time||'';
+      if(at&&bt) return at.localeCompare(bt);
+      if(at) return -1; if(bt) return 1; return 0;
+    });
   }
-  const first = tasks.find(t => !S.taskDone.has(t.id) && t.subs && t.subs.length > 0);
-  if (first) _taskExpandId = first.id;
+  // find first undone task — expand if has subs, set null if not
+  const first = tasks.find(t => !S.taskDone.has(t.id));
+  _taskExpandId = (first && first.subs && first.subs.length > 0) ? first.id : null;
 }
 
 let _renderPending = false;
