@@ -1804,7 +1804,20 @@ function nav(t) {
   _curTab=t;
   document.querySelectorAll('.ntab,.bnav-btn').forEach(b=>{b.classList.toggle('on',b.dataset.tab===t);});
   document.getElementById('scroll-area').scrollTop=0;
+  // auto-expand the first undone task with subtasks on world/tasks tab
+  autoExpandFirst();
   render();
+}
+
+function autoExpandFirst() {
+  let tasks = [];
+  if (_curTab === 'world') {
+    tasks = getWorldTasks();
+  } else if (_curTab === 'tasks') {
+    tasks = allTasks().filter(t => t.type === (S.taskCurType||'daily'));
+  }
+  const first = tasks.find(t => !S.taskDone.has(t.id) && t.subs && t.subs.length > 0);
+  if (first) _taskExpandId = first.id;
 }
 
 let _renderPending = false;
@@ -1861,6 +1874,7 @@ function _doRender() {
 // ═══════════════ INIT ═══════════════
 loadState();
 checkNewDay();
+autoExpandFirst();
 render();
 updateXPBar();
 startClock();
