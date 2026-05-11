@@ -418,6 +418,7 @@ textarea.inp{resize:none;min-height:60px;line-height:1.5}
       <button class="ntab"    data-tab="streak" onclick="nav('streak')">🔥 连击</button>
       <button class="ntab"    data-tab="ach"    onclick="nav('ach')">🏆 成就</button>
       <button class="ntab"    data-tab="map"    onclick="nav('map')">🗺 地图</button>
+      <button class="ntab"    data-tab="inv"    onclick="nav('inv')">🎒 物品</button>
     </div>
     <div class="nav-right">
       <div class="flame-badge">🔥<span id="nb-streak">7</span></div>
@@ -441,6 +442,7 @@ textarea.inp{resize:none;min-height:60px;line-height:1.5}
     <button class="bnav-btn"    data-tab="streak" onclick="nav('streak')"><span class="bnav-ico">🔥</span><span class="bnav-lbl">连击</span></button>
     <button class="bnav-btn"    data-tab="ach"    onclick="nav('ach')"><span class="bnav-ico">🏆</span><span class="bnav-lbl">成就</span></button>
     <button class="bnav-btn"    data-tab="map"    onclick="nav('map')"><span class="bnav-ico">🗺</span><span class="bnav-lbl">地图</span></button>
+    <button class="bnav-btn"    data-tab="inv"    onclick="nav('inv')"><span class="bnav-ico">🎒</span><span class="bnav-lbl">物品</span></button>
   </div>
   <div id="pop-layer" style="display:none" class="pop-wrap" onclick="closePop()">
     <div class="pop" onclick="event.stopPropagation()">
@@ -466,6 +468,15 @@ textarea.inp{resize:none;min-height:60px;line-height:1.5}
     <div style="display:flex;gap:8px">
       <button onclick="doReset()" style="flex:1;padding:8px;border-radius:10px;border:none;background:#c84040;color:#fff;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">确认重置</button>
       <button onclick="cancelReset()" style="flex:1;padding:8px;border-radius:10px;border:1.5px solid #d0b0b0;background:transparent;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;color:#a06060;cursor:pointer">取消</button>
+    </div>
+  </div>
+  <div id="purchase-prompt" style="display:none;position:absolute;bottom:60px;left:12px;right:12px;background:#eef4fc;border:2px solid #7aabdc;border-radius:14px;padding:14px;flex-direction:column;gap:10px;z-index:30;box-shadow:0 4px 20px rgba(40,60,90,0.18)">
+    <div style="font-size:13px;font-weight:800;color:#3a6ab0">🛒 补充库存</div>
+    <div id="purchase-prompt-label" style="font-size:12px;color:var(--txt2)">购买了多少？</div>
+    <input id="purchase-prompt-inp" type="number" min="1" style="background:#f5ede0;border:1.5px solid var(--bd);border-radius:8px;padding:8px 11px;font-size:13px;font-family:'Nunito',sans-serif;color:var(--txt);outline:none;width:100%" placeholder="输入数量…">
+    <div style="display:flex;gap:8px">
+      <button onclick="confirmPurchase()" style="flex:1;padding:8px;border-radius:10px;border:none;background:#5a8ac8;color:#fff;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">✦ 确认</button>
+      <button onclick="cancelPurchase()" style="flex:1;padding:8px;border-radius:10px;border:1.5px solid var(--bd2);background:transparent;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;color:var(--txt2);cursor:pointer">取消</button>
     </div>
   </div>
   <div id="import-overlay" style="display:none;position:absolute;inset:12px;background:var(--card);border:2px solid var(--bd);border-radius:16px;padding:16px;flex-direction:column;gap:10px;z-index:31;box-shadow:0 4px 32px rgba(90,74,56,0.2)">
@@ -528,6 +539,8 @@ const DEFAULT_STATE = {
   customRooms: {},
   lastActiveDate: null,
   _isNewDay: false,
+  inventory: [],
+  nextItemId: 1,
 };
 
 
@@ -737,6 +750,8 @@ function loadState() {
       S.customRooms = S.customRooms && typeof S.customRooms==='object' ? S.customRooms : {};
       if(!S.svBase) S.svBase={str:60,exe:50,foc:55,moo:65};
       if(!S.sv) S.sv={str:60,exe:50,foc:55,hlt:50,moo:65,int:40};
+      S.inventory  = Array.isArray(S.inventory) ? S.inventory : [];
+      if(!S.nextItemId) S.nextItemId = 1;
       return;
     }
   } catch(e) {}
@@ -1460,13 +1475,13 @@ function renderMap() {
 let _taskAddOpen = false;
 let _goalsOpen = true;
 let _taskEditId = null;
-let _taskAF = {type:'daily',nm:'',ico:'⭐',xp:30,attrs:[],loc:'any',time:'',repeat:'daily',repeatDay:1,repeatDate:1,desc:'',subs:[],subInp:''};
+let _taskAF = {type:'daily',nm:'',ico:'⭐',xp:30,attrs:[],loc:'any',time:'',repeat:'daily',repeatDay:1,repeatDate:1,desc:'',subs:[],subInp:'',consumeItems:[]};
 let _taskExpandId = null;
 let _pendingDeleteId = null;
 
 function toggleGoals(){ _goalsOpen=!_goalsOpen; render(); }
 function setTaskType(t){ S.taskCurType=t; _taskAddOpen=false; saveState(); autoExpandFirst(); render(); }
-function openTaskAdd(type){ _taskAF={type:type||S.taskCurType||'daily',nm:'',ico:'⭐',xp:30,attrs:[],loc:'any',time:'',repeat:'daily',repeatDay:1,repeatDate:1,desc:'',subs:[],subInp:''}; _taskEditId=null; _taskAddOpen=true; render(); }
+function openTaskAdd(type){ _taskAF={type:type||S.taskCurType||'daily',nm:'',ico:'⭐',xp:30,attrs:[],loc:'any',time:'',repeat:'daily',repeatDay:1,repeatDate:1,desc:'',subs:[],subInp:'',consumeItems:[]}; _taskEditId=null; _taskAddOpen=true; render(); }
 function closeTaskAdd(){ _taskAddOpen=false; _taskEditId=null; render(); }
 function setTaskAFType(t){ _taskAF.type=t; render(); }
 function setTaskAFIco(ic){ _taskAF.ico=ic; render(); }
@@ -1486,9 +1501,9 @@ function saveNewTask(){
   if(!S.userTasks) S.userTasks=[];
   if(_taskEditId!=null){
     const i=S.userTasks.findIndex(t=>t.id===_taskEditId);
-    if(i>=0) S.userTasks[i]={...S.userTasks[i],..._taskAF,nm,desc,xp,loc,time,repeat:_taskAF.repeat,repeatDay:_taskAF.repeatDay,repeatDate:_taskAF.repeatDate,id:_taskEditId};
+    if(i>=0) S.userTasks[i]={...S.userTasks[i],..._taskAF,nm,desc,xp,loc,time,repeat:_taskAF.repeat,repeatDay:_taskAF.repeatDay,repeatDate:_taskAF.repeatDate,consumeItems:[...(_taskAF.consumeItems||[])],id:_taskEditId};
   } else {
-    S.userTasks.push({id:S.taskNextId++,type:_taskAF.type,nm,ico:_taskAF.ico,xp,attrs:[..._taskAF.attrs],loc,time,repeat:_taskAF.repeat||'daily',repeatDay:_taskAF.repeatDay||1,repeatDate:_taskAF.repeatDate||1,desc,subs:[..._taskAF.subs]});
+    S.userTasks.push({id:S.taskNextId++,type:_taskAF.type,nm,ico:_taskAF.ico,xp,attrs:[..._taskAF.attrs],loc,time,repeat:_taskAF.repeat||'daily',repeatDay:_taskAF.repeatDay||1,repeatDate:_taskAF.repeatDate||1,desc,subs:[..._taskAF.subs],consumeItems:[...(_taskAF.consumeItems||[])]});
   }
   S.taskCurType=_taskAF.type;
   const wasEdit=_taskEditId!=null;
@@ -1497,7 +1512,7 @@ function saveNewTask(){
 }
 function editTask(id){
   const t=S.userTasks.find(t=>t.id===id); if(!t)return;
-  _taskAF={...t,subs:[...(t.subs||[])],attrs:[...(t.attrs||[])],time:t.time||'',repeat:t.repeat||'daily',repeatDay:t.repeatDay||1,repeatDate:t.repeatDate||1,subInp:''};
+  _taskAF={...t,subs:[...(t.subs||[])],attrs:[...(t.attrs||[])],time:t.time||'',repeat:t.repeat||'daily',repeatDay:t.repeatDay||1,repeatDate:t.repeatDate||1,subInp:'',consumeItems:[...(t.consumeItems||[])]};
   _taskEditId=id; _taskAddOpen=true; render();
 }
 function deleteUserTask(id){
@@ -1557,6 +1572,16 @@ function toggleSubTask(sid, parentId, parentXp){
           S.sv[k]=Math.min(100,(S.sv[k]||0)+sd.gain);
         });
         updateXPBar();
+        const _subTasksBefore = (S.userTasks||[]).length;
+        consumeInventoryItems(parent);
+        const _subNewQuests = (S.userTasks||[]).slice(_subTasksBefore).filter(t=>t.isPurchaseQuest);
+        if (_subNewQuests.length) {
+          const _names = _subNewQuests.map(t=>t.purchaseItemName||t.nm).join('、');
+          S.taskCurType = 'side';
+          _curTab = 'tasks';
+          document.querySelectorAll('.ntab,.bnav-btn').forEach(b=>b.classList.toggle('on', b.dataset.tab==='tasks'));
+          setTimeout(()=>showToast('⚠ 库存告急：' + _names + ' → 已生成补货任务'), 1200);
+        }
         if(parent.type==='main'){
           document.getElementById('pop-ico').textContent='🎉';
           document.getElementById('pop-ttl').textContent='主线任务完成！';
@@ -1655,8 +1680,231 @@ function renderTaskAddForm(){
         <button onclick="addTaskSub()" style="padding:7px 12px;border-radius:8px;border:none;background:var(--acc2);color:#fff;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">+ 添加</button>
       </div>
     </div>
+    ${allInventory().length>0?`<div>
+      <div style="font-size:11px;font-weight:700;color:var(--txt2);margin-bottom:5px">📦 完成时消耗物品（可选）</div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px">
+        ${(af.consumeItems||[]).map((ci,i)=>{const it=getInventoryItem(ci.itemId);return `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--txt2)"><span style="flex:1">📦 ${it?it.name:ci.itemId} ×${ci.amount}</span><button onclick="delConsumeItem(${i})" style="border:none;background:transparent;color:var(--txt3);cursor:pointer;font-size:13px">✕</button></div>`;}).join('')}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <select id="taf-ci-sel" class="inp" style="flex:2;padding:5px 7px;font-size:12px">
+          <option value="">选择物品…</option>
+          ${allInventory().map(it=>`<option value="${it.itemId}">${it.name}（剩${it.remainingUses}）</option>`).join('')}
+        </select>
+        <input id="taf-ci-amt" type="number" min="1" value="1" class="inp" style="width:52px;padding:5px 7px;font-size:12px">
+        <button onclick="addConsumeItem()" style="padding:6px 10px;border-radius:8px;border:none;background:var(--acc3);color:#fff;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">绑定</button>
+      </div>
+    </div>`:''}
     <button onclick="saveNewTask()" style="padding:11px;border-radius:12px;border:none;background:var(--acc);color:#fff;font-family:'Nunito',sans-serif;font-size:13px;font-weight:800;cursor:pointer">${isEdit?'保存修改':'✦ 创建任务'}</button>
   </div>`;
+}
+
+// ═══════════════ INVENTORY SYSTEM ═══════════════
+function allInventory() { return S.inventory || []; }
+function getInventoryItem(id) { return allInventory().find(i => i.itemId === id); }
+function hasPurchaseQuest(itemId) {
+  return allTasks().some(t => t.isPurchaseQuest && t.purchaseItemId === itemId && !S.taskDone.has(t.id));
+}
+function createPurchaseQuest(item) {
+  if (!S.userTasks) S.userTasks = [];
+  S.userTasks.push({
+    id: S.taskNextId++, type: 'side', nm: '购买 ' + item.name,
+    ico: '🛒', xp: 20, attrs: [], loc: 'mall_super', time: '',
+    repeat: 'none', repeatDay: 1, repeatDate: 1,
+    desc: '库存不足（剩余 ' + item.remainingUses + '/' + item.totalUses + '），需要补充 ' + item.name,
+    subs: [], isPurchaseQuest: true,
+    purchaseItemId: item.itemId, purchaseItemName: item.name,
+  });
+}
+function consumeInventoryItems(task) {
+  if (!task || !task.consumeItems || !task.consumeItems.length) return;
+  task.consumeItems.forEach(ci => {
+    const item = getInventoryItem(ci.itemId);
+    if (!item) return;
+    item.remainingUses = Math.max(0, item.remainingUses - (ci.amount || 1));
+    if (item.totalUses > 0 && item.remainingUses / item.totalUses <= (item.threshold || 0.2)) {
+      if (!hasPurchaseQuest(item.itemId)) createPurchaseQuest(item);
+    }
+  });
+}
+
+// Inventory CRUD
+let _invEditId = null;
+function addInventoryItem() {
+  const nm = (document.getElementById('inv-add-name')?.value || '').trim();
+  const total = parseInt(document.getElementById('inv-add-total')?.value) || 30;
+  if (!nm) { showToast('请填写物品名称'); return; }
+  if (!S.inventory) S.inventory = [];
+  const itemId = 'item' + (S.nextItemId++);
+  S.inventory.push({ itemId, name: nm, totalUses: total, remainingUses: total, threshold: 0.2 });
+  if (document.getElementById('inv-add-name')) document.getElementById('inv-add-name').value = '';
+  if (document.getElementById('inv-add-total')) document.getElementById('inv-add-total').value = '30';
+  saveState(); render(); showToast('✦ 「' + nm + '」已加入背包！');
+}
+function startInventoryEdit(id) { _invEditId = id; render(); }
+function cancelInventoryEdit() { _invEditId = null; render(); }
+function saveInventoryEdit() {
+  const item = getInventoryItem(_invEditId); if (!item) return;
+  const nm = (document.getElementById('inv-edit-name')?.value || '').trim();
+  const total = parseInt(document.getElementById('inv-edit-total')?.value) || item.totalUses;
+  const remaining = parseInt(document.getElementById('inv-edit-remaining')?.value);
+  if (nm) item.name = nm;
+  item.totalUses = Math.max(1, total);
+  item.remainingUses = isNaN(remaining) ? item.remainingUses : Math.max(0, remaining);
+  _invEditId = null;
+  saveState(); render(); showToast('✅ 物品已更新');
+}
+function deleteInventoryItem(id) {
+  S.inventory = (S.inventory || []).filter(i => i.itemId !== id);
+  if (_invEditId === id) _invEditId = null;
+  saveState(); render(); showToast('🗑 物品已删除');
+}
+
+// Purchase prompt state
+let _purchasePromptData = null;
+function showPurchasePrompt(itemId, taskId, taskXp) {
+  _purchasePromptData = { itemId, taskId, taskXp };
+  const item = getInventoryItem(itemId);
+  const el = document.getElementById('purchase-prompt');
+  if (el) {
+    document.getElementById('purchase-prompt-label').textContent = '购买了多少个「' + (item ? item.name : '物品') + '」？';
+    document.getElementById('purchase-prompt-inp').value = '';
+    el.style.display = 'flex';
+    setTimeout(() => document.getElementById('purchase-prompt-inp')?.focus(), 50);
+  }
+}
+function confirmPurchase() {
+  const val = parseInt(document.getElementById('purchase-prompt-inp')?.value) || 0;
+  const el = document.getElementById('purchase-prompt');
+  if (el) el.style.display = 'none';
+  if (!_purchasePromptData) return;
+  const { itemId, taskId, taskXp } = _purchasePromptData;
+  _purchasePromptData = null;
+  // Replenish stock: purely additive, no cap (spec: remainingUses += input)
+  const item = getInventoryItem(itemId);
+  if (item && val > 0) item.remainingUses = item.remainingUses + val;
+  // Complete the purchase task (skip inventory deduction for purchase quests)
+  const task = allTasks().find(t => t.id === taskId);
+  if (!task || S.taskDone.has(taskId)) { saveState(); render(); return; }
+  const bonus = streakBonus();
+  S.taskDone.add(taskId);
+  const earned = Math.round(taskXp * bonus);
+  S.xp += earned;
+  task.attrs?.forEach(k => { const sd = STATS.find(s => s.key === k); if (sd) S.sv[k] = Math.min(100, (S.sv[k] || 0) + sd.gain); });
+  if (!S.subDone) S.subDone = new Set();
+  task.subs?.forEach(s => S.subDone.add(String(s.id)));
+  if (S.xp >= LV_CAP()) { S.lv++; S.xp -= LV_CAP(); showToast('🎉 升级！现在是 Lv.' + S.lv); }
+  else showToast(val > 0 ? '+' + earned + ' XP · 已补充 ' + val + ' 次' : '+' + earned + ' XP');
+  checkAchs();
+  saveState(); updateXPBar(); autoExpandFirst(); render();
+}
+function cancelPurchase() {
+  _purchasePromptData = null;
+  const el = document.getElementById('purchase-prompt');
+  if (el) el.style.display = 'none';
+}
+
+// consumeItems management in task form
+function addConsumeItem() {
+  const sel = document.getElementById('taf-ci-sel');
+  const amtEl = document.getElementById('taf-ci-amt');
+  const itemId = sel?.value;
+  const amount = parseInt(amtEl?.value) || 1;
+  if (!itemId) { showToast('请先选择物品'); return; }
+  if (!_taskAF.consumeItems) _taskAF.consumeItems = [];
+  const existing = _taskAF.consumeItems.find(c => c.itemId === itemId);
+  if (existing) { existing.amount = amount; }
+  else { _taskAF.consumeItems.push({ itemId, amount }); }
+  render();
+}
+function delConsumeItem(idx) { _taskAF.consumeItems.splice(idx, 1); render(); }
+
+// Inventory tab renderer
+function renderInventory() {
+  const items = allInventory();
+  let editForm = '';
+  if (_invEditId) {
+    const it = getInventoryItem(_invEditId);
+    if (it) editForm = `<div style="background:var(--card);border:2px solid var(--acc3);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;font-weight:800;color:var(--txt)">编辑物品</div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--txt2);margin-bottom:4px">物品名称</div>
+        <input class="inp" id="inv-edit-name" value="${it.name}">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--txt2);margin-bottom:4px">最大次数</div>
+          <input class="inp" id="inv-edit-total" type="number" min="1" value="${it.totalUses}" style="padding:6px 8px">
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--txt2);margin-bottom:4px">当前剩余</div>
+          <input class="inp" id="inv-edit-remaining" type="number" min="0" value="${it.remainingUses}" style="padding:6px 8px">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="saveInventoryEdit()" style="flex:1;padding:9px;border-radius:10px;border:none;background:var(--acc);color:#fff;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">保存</button>
+        <button onclick="cancelInventoryEdit()" style="flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--bd);background:transparent;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;color:var(--txt2);cursor:pointer">取消</button>
+      </div>
+    </div>`;
+  }
+
+  const itemCards = items.map(it => {
+    const pct = it.totalUses > 0 ? Math.round(it.remainingUses / it.totalUses * 100) : 0;
+    const barPct = Math.min(100, pct); // bar capped at 100%; pct label shows real value
+    const isLow = pct <= Math.round((it.threshold || 0.2) * 100);
+    const barCol = isLow ? '#c84040' : pct <= 50 ? '#e8b850' : '#7aaa5a';
+    return `<div style="background:${isLow ? '#fff8f8' : 'var(--card)'};border:1.5px solid ${isLow ? '#f0b0b0' : 'var(--bd)'};border-radius:12px;padding:11px 12px;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">📦</span>
+        <span style="flex:1;font-size:13px;font-weight:700;color:var(--txt)">${it.name}</span>
+        ${isLow ? '<span style="font-size:9px;font-weight:700;background:#fce8e8;color:#c84040;border:1px solid #f0b0b0;border-radius:6px;padding:1px 6px">⚠ 不足</span>' : ''}
+        <button onclick="startInventoryEdit('${it.itemId}')" style="border:none;background:#f0ede8;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center">✏️</button>
+        <button onclick="deleteInventoryItem('${it.itemId}')" style="border:none;background:#fce8e8;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center">🗑</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:6px;background:#e8ddd0;border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${barPct}%;background:${barCol};border-radius:3px;transition:width 0.5s"></div>
+        </div>
+        <span style="font-size:11px;font-weight:800;color:${isLow ? '#c84040' : 'var(--txt2)'}">${it.remainingUses}/${it.totalUses}</span>
+        <span style="font-size:10px;font-weight:700;color:${isLow ? '#c84040' : 'var(--txt3)'}">${pct}%</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const addForm = `<div style="background:var(--card);border:1.5px dashed var(--bd);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div style="font-size:10px;font-weight:800;color:var(--txt2);letter-spacing:1px">添加新物品</div>
+    <input class="inp" id="inv-add-name" placeholder="物品名称，例：牙膏">
+    <div style="display:flex;gap:8px;align-items:flex-end">
+      <div style="flex:1">
+        <div style="font-size:11px;font-weight:700;color:var(--txt2);margin-bottom:4px">总使用次数</div>
+        <input class="inp" id="inv-add-total" type="number" min="1" value="30" style="padding:6px 8px">
+      </div>
+      <button onclick="addInventoryItem()" style="padding:8px 16px;border-radius:10px;border:none;background:var(--acc2);color:#fff;font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">✦ 添加</button>
+    </div>
+  </div>`;
+
+  // Low stock alerts
+  const lowItems = items.filter(it => it.totalUses > 0 && it.remainingUses / it.totalUses <= (it.threshold || 0.2));
+  const alertBanner = lowItems.length ? `<div style="background:#fff0f0;border:1.5px solid #f0b0b0;border-radius:10px;padding:9px 12px;display:flex;align-items:center;gap:8px">
+    <span style="font-size:16px">⚠️</span>
+    <div style="flex:1">
+      <div style="font-size:11px;font-weight:700;color:#c84040">库存告急：${lowItems.map(i=>i.name).join('、')}</div>
+      <div style="font-size:10px;color:var(--txt2);margin-top:1px">已自动生成补货任务，前往「支线任务」完成</div>
+    </div>
+  </div>` : '';
+
+  return `
+    <div style="background:#e0f0fc;border:1.5px solid #a0cce8;border-radius:12px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:22px">🎒</span>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:800;color:#2078a8">物品库存</div>
+        <div style="font-size:10px;color:var(--txt2);margin-top:2px">完成任务自动消耗绑定物品 · 低于20%自动生成补货任务</div>
+      </div>
+      <div style="text-align:right;font-size:11px;color:var(--txt2);font-weight:700">${items.length} 件物品<br>${lowItems.length > 0 ? '<span style="color:#c84040">' + lowItems.length + ' 件告急</span>' : '全部充足'}</div>
+    </div>
+    ${alertBanner}
+    ${editForm}
+    ${items.length === 0 ? '<div style="text-align:center;padding:28px 16px;color:var(--txt3);font-size:13px;line-height:2"><div style="font-size:36px;margin-bottom:8px">📦</div>背包是空的<br>添加你需要追踪的消耗品</div>' : itemCards}
+    ${addForm}`;
 }
 
 // ═══════════════ ACTIONS ═══════════════
@@ -1687,6 +1935,11 @@ function toggleTask(id, xp) {
     // clear all subtasks when unchecking parent
     task?.subs?.forEach(s=>{ if(S.subDone) S.subDone.delete(s.id); });
   } else {
+    // Purchase quests: show restock prompt before completing
+    if (task?.isPurchaseQuest && task?.purchaseItemId) {
+      showPurchasePrompt(task.purchaseItemId, id, xp);
+      return;
+    }
     S.taskDone.add(id);
     const earned=Math.round(xp*bonus);
     S.xp+=earned;
@@ -1697,6 +1950,10 @@ function toggleTask(id, xp) {
     // mark all subtasks done when manually completing parent
     if(!S.subDone) S.subDone=new Set();
     task?.subs?.forEach(s=>S.subDone.add(s.id));
+    // Deduct inventory and detect newly generated purchase quests
+    const _tasksBefore = (S.userTasks||[]).length;
+    consumeInventoryItems(task);
+    const _newQuests = (S.userTasks||[]).slice(_tasksBefore).filter(t=>t.isPurchaseQuest);
     if(S.xp>=LV_CAP()){S.lv++;S.xp-=LV_CAP();showToast('🎉 升级！现在是 Lv.'+S.lv);}
     else {
       if(task?.type==='main'){
@@ -1708,6 +1965,14 @@ function toggleTask(id, xp) {
       } else showToast('+'+earned+' XP');
     }
     checkAchs();
+    // Auto-navigate to side task tab and notify about new purchase quests
+    if (_newQuests.length) {
+      const names = _newQuests.map(t=>t.purchaseItemName||t.nm).join('、');
+      S.taskCurType = 'side';
+      _curTab = 'tasks';
+      document.querySelectorAll('.ntab,.bnav-btn').forEach(b=>b.classList.toggle('on', b.dataset.tab==='tasks'));
+      setTimeout(()=>showToast('⚠ 库存告急：' + names + ' → 已生成补货任务'), 1200);
+    }
   }
   saveState(); updateXPBar(); autoExpandFirst(); render();
 }
@@ -1845,6 +2110,7 @@ function _doRender() {
     else if(_curTab==='streak') html=renderStreak();
     else if(_curTab==='ach')    html=renderAch();
     else if(_curTab==='map')    html=renderMap();
+    else if(_curTab==='inv')    html=renderInventory();
   } catch(e) {
     p.innerHTML=`<div style="padding:20px;color:#c84040;font-size:12px;line-height:1.8">
       <b>渲染出错（${_curTab}）：</b><br>${e.message}<br><br>
